@@ -1072,7 +1072,11 @@ fn splice(sql: &str, range: Range<usize>, clause: &str) -> String {
             continue;
         }
         if !spliced.is_empty() {
-            spliced.push(' ');
+            let comment = spliced
+                .lines()
+                .last()
+                .is_some_and(|line| line.contains("--") || line.contains('#'));
+            spliced.push(if comment { '\n' } else { ' ' });
         }
         spliced.push_str(part);
     }
@@ -4352,6 +4356,39 @@ mod tests {
         assert_eq!(
             appended_statement("SELECT 1;", "UPDATE t SET a = 1"),
             "SELECT 1;\n\nUPDATE t SET a = 1"
+        );
+    }
+
+    #[test]
+    fn a_sort_spliced_after_a_line_comment_starts_its_own_line() {
+        let by_name = [SortKey::new("name", true)];
+        for (statement, expected) in [
+            (
+                "select * from t -- recent\nlimit 10",
+                "select * from t -- recent\nORDER BY name ASC limit 10",
+            ),
+            (
+                "select * from t -- recent\norder by id limit 10",
+                "select * from t -- recent\nORDER BY name ASC limit 10",
+            ),
+            (
+                "select * from t /* recent */ limit 10",
+                "select * from t /* recent */ ORDER BY name ASC limit 10",
+            ),
+        ] {
+            assert_eq!(
+                with_order_by(Engine::Sqlite, statement, &by_name).as_deref(),
+                Some(expected)
+            );
+        }
+        assert_eq!(
+            with_order_by(
+                Engine::Sqlite,
+                "select * from t -- recent\norder by id limit 10",
+                &[]
+            )
+            .as_deref(),
+            Some("select * from t -- recent\nlimit 10")
         );
     }
 
